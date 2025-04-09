@@ -212,10 +212,10 @@ def SEE_dbscan(arg1):
     X_scaled = scaler.fit_transform(X)
     
     # Explore candidate eps values for DBSCAN
-    eps_candidates = np.linspace(0.1, 20.0, 300)
+    eps_candidates = np.linspace(0.001, 10.0, 100)
     dunn_scores = {}
     for eps in eps_candidates:
-        dbscan_candidate = DBSCAN(eps=eps, min_samples=3)
+        dbscan_candidate = DBSCAN(eps=eps, min_samples=2)
         candidate_labels = dbscan_candidate.fit_predict(X_scaled)
         # Consider only if there are at least 2 clusters (ignoring noise)
         valid_clusters = set(candidate_labels) - {-1}
@@ -238,7 +238,7 @@ def SEE_dbscan(arg1):
     plt.ylabel("Dunn Index")
     plt.show()
     
-    dbscan_final = DBSCAN(eps=optimal_eps)
+    dbscan_final = DBSCAN(eps=optimal_eps, min_samples=2)
     labels_final = dbscan_final.fit_predict(X_scaled)
     df_ecdf['cluster'] = labels_final
     

@@ -183,7 +183,7 @@ def SEE_dbscan(arg1):
     eps_candidates = np.linspace(0.01, 10.0, 100)
     entropy_scores = {}
     for eps in eps_candidates:
-        dbscan_candidate = DBSCAN(eps=eps, min_samples=1)  # Using default min_samples (typically 5)
+        dbscan_candidate = DBSCAN(eps=eps, min_samples=4)  # Using default min_samples (typically 5)
         candidate_labels = dbscan_candidate.fit_predict(X)
         # Only compute entropy if more than one valid cluster (ignoring noise) is found
         if len(set(candidate_labels) - {-1}) > 1:
@@ -205,7 +205,7 @@ def SEE_dbscan(arg1):
     plt.ylabel("Entropy")
     plt.show()
     
-    dbscan_final = DBSCAN(eps=optimal_eps)
+    dbscan_final = DBSCAN(eps=optimal_eps, min_samples=4)
     labels_final = dbscan_final.fit_predict(X_scaled)
     df_ecdf['cluster'] = labels_final
     

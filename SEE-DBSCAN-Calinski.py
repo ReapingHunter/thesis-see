@@ -192,7 +192,7 @@ def SEE_dbscan(arg1):
     plt.ylabel("Calinski–Harabasz Index")
     plt.show()
     
-    dbscan_final = DBSCAN(eps=optimal_eps)
+    dbscan_final = DBSCAN(eps=optimal_eps, min_samples=2)
     labels_final = dbscan_final.fit_predict(X_scaled)
     df_ecdf['cluster'] = labels_final
     
