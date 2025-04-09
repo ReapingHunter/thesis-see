@@ -169,7 +169,7 @@ def SEE_dbscan(arg1):
     X_scaled = scaler.fit_transform(X)
     
     # Explore candidate eps values for DBSCAN
-    eps_candidates = np.linspace(0.01, 10.0, 100)
+    eps_candidates = np.linspace(0.1, 5.0, 10)
     ch_scores = {}
     for eps in eps_candidates:
         dbscan_candidate = DBSCAN(eps=eps, min_samples=2)  # Using default min_samples (typically 5)

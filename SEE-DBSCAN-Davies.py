@@ -169,10 +169,10 @@ def SEE_dbscan(arg1):
     X_scaled = scaler.fit_transform(X)
     
     # Explore candidate eps values for DBSCAN
-    eps_candidates = np.linspace(0.01, 10.0, 100)
+    eps_candidates = np.linspace(0.1, 10.0, 10)
     db_scores = {}
     for eps in eps_candidates:
-        dbscan_candidate = DBSCAN(eps=eps, min_samples=3)  # Using default min_samples (typically 5)
+        dbscan_candidate = DBSCAN(eps=eps, min_samples=2)  # Using default min_samples (typically 5)
         candidate_labels = dbscan_candidate.fit_predict(X)
         unique_labels = set(candidate_labels)
         if len(unique_labels - {-1}) > 1:  # More than one valid cluster
@@ -192,7 +192,7 @@ def SEE_dbscan(arg1):
     plt.ylabel("Davies–Bouldin Index")
     plt.show()
     
-    dbscan_final = DBSCAN(eps=optimal_eps, min_samples=3)
+    dbscan_final = DBSCAN(eps=optimal_eps, min_samples=2)
     labels_final = dbscan_final.fit_predict(X_scaled)
     df_ecdf['cluster'] = labels_final
     

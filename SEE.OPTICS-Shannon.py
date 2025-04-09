@@ -6,25 +6,12 @@ import seaborn as sns
 from statsmodels.distributions.empirical_distribution import ECDF
 from scipy.stats import gaussian_kde, mannwhitneyu
 from sklearn.preprocessing import StandardScaler
-from sklearn.cluster import DBSCAN
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, OPTICS
 from sklearn.metrics import silhouette_score
 
 # rpy2 (for AdhereR)
 import rpy2.robjects as robjects
 from rpy2.robjects import pandas2ri
-
-# Function to compute Shannon entropy of clustering (ignoring noise, i.e. label -1)
-def clustering_entropy(labels):
-    # Filter out noise points
-    valid = labels[labels != -1]
-    if len(valid) == 0:
-        return None
-    unique, counts = np.unique(valid, return_counts=True)
-    p = counts / counts.sum()
-    # Compute entropy: higher means a more balanced cluster distribution.
-    entropy = -np.sum(p * np.log(p))
-    return entropy
 
 # -------------------------
 # Load dataset – uses AdhereR's med.events
@@ -38,6 +25,23 @@ ExamplePats = med_events.copy()
 tidy = ExamplePats.copy()
 tidy.columns = ["pnr", "eksd", "perday", "ATC", "dur_original"]
 tidy['eksd'] = pd.to_datetime(tidy['eksd'], format='%m/%d/%Y')
+
+# -------------------------
+# Helper function to compute Shannon's entropy of cluster labels
+# -------------------------
+def shannon_entropy(labels):
+    # If noise label (-1) is present, remove it
+    if -1 in labels:
+        valid_labels = labels[labels != -1]
+    else:
+        valid_labels = labels
+    # If no cluster found (or only noise), return 0 entropy
+    if len(valid_labels) == 0:
+        return 0
+    unique, counts = np.unique(valid_labels, return_counts=True)
+    p = counts / counts.sum()
+    entropy = -np.sum(p * np.log(p))
+    return entropy
 
 # -------------------------
 # SEE using KMeans with Silhouette Analysis
@@ -77,7 +81,6 @@ def SEE_kmeans(arg1):
     # We won’t use KDE for clustering in this version; we cluster on ECDF x-values.
     
     # --- KMeans Clustering with Silhouette Analysis on ECDF x-values ---
-    # We'll cluster the original sorted x-values
     X = df_ecdf[['x']].values
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
@@ -138,9 +141,9 @@ def SEE_kmeans(arg1):
     return final_df, data  # return the clustering details with the 'test' differences
 
 # -------------------------
-# SEE using DBSCAN with Shannon
+# SEE using OPTICS with Shannon’s Entropy Analysis to find optimal min_samples
 # -------------------------
-def SEE_dbscan(arg1):
+def SEE_optics(arg1):
     # Filter rows where ATC equals arg1
     subset = tidy[tidy['ATC'] == arg1].copy()
     base_data = subset.copy()
@@ -174,40 +177,37 @@ def SEE_dbscan(arg1):
     x_grid = np.linspace(log_intervals.min(), log_intervals.max(), 100)
     y_kde = kde(x_grid)
     
-    # (We again work with the ECDF x-values for clustering)
+    # (We work with the ECDF x-values for clustering)
     X = df_ecdf[['x']].values
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
     
-    # Explore candidate eps values for DBSCAN
-    eps_candidates = np.linspace(0.1, 10.0, 10)
+    # --- Shannon’s Entropy Analysis using OPTICS ---
+    # Loop over candidate values for min_samples (e.g., 2 to 10)
     entropy_scores = {}
-    for eps in eps_candidates:
-        dbscan_candidate = DBSCAN(eps=eps, min_samples=5)  # Using default min_samples (typically 5)
-        candidate_labels = dbscan_candidate.fit_predict(X)
-        # Only compute entropy if more than one valid cluster (ignoring noise) is found
-        if len(set(candidate_labels) - {-1}) > 1:
-            score = clustering_entropy(candidate_labels)
-            if score is not None:
-                entropy_scores[eps] = score
-
+    candidate_min_samples = range(2, 20)
+    for ms in candidate_min_samples:
+        optics_candidate = OPTICS(min_samples=ms, cluster_method='xi')
+        candidate_labels = optics_candidate.fit_predict(X_scaled)
+        unique_labels = set(candidate_labels)
+        # Only compute if more than one cluster is found (ignoring noise labeled as -1)
+        if len(unique_labels - {-1}) > 1:
+            score = shannon_entropy(candidate_labels)
+            entropy_scores[ms] = score
     if entropy_scores:
-        # We choose the candidate with the minimum entropy (i.e. most balanced cluster distribution)
-        optimal_eps = min(entropy_scores, key=entropy_scores.get)
+        optimal_ms = min(entropy_scores, key=entropy_scores.get)
     else:
-        optimal_eps = 0.5  # fallback if entropy could not be computed
-
-    # Plot entropy scores as a function of eps
-    plt.figure(figsize=(8, 5))
+        optimal_ms = 2
+    
+    plt.figure(figsize=(8,5))
     plt.plot(list(entropy_scores.keys()), list(entropy_scores.values()), marker='o')
-    plt.title("Entropy Analysis (DBSCAN)")
-    plt.xlabel("eps")
-    plt.ylabel("Entropy")
+    plt.title("OPTICS Shannon’s Entropy Analysis (min_samples)")
+    plt.xlabel("min_samples")
+    plt.ylabel("Shannon’s Entropy (lower is better)")
     plt.show()
     
-    print(optimal_eps)
-    dbscan_final = DBSCAN(eps=optimal_eps, min_samples=5)
-    labels_final = dbscan_final.fit_predict(X_scaled)
+    optics_final = OPTICS(min_samples=optimal_ms, cluster_method='xi')
+    labels_final = optics_final.fit_predict(X_scaled)
     df_ecdf['cluster'] = labels_final
     
     # Compute cluster statistics (ignoring noise - label -1)
@@ -225,12 +225,14 @@ def SEE_dbscan(arg1):
     else:
         cluster_stats = pd.DataFrame()
     
-    # Cross join to assign clusters based on event interval falling within [Minimum, Maximum]
+    # Cross join to assign clusters based on event.interval falling within [Minimum, Maximum]
     data['_key'] = 1
     if not cluster_stats.empty:
         cluster_stats['_key'] = 1
         cross_df = pd.merge(data, cluster_stats, on='_key').drop('_key', axis=1)
-        cross_df['Final_cluster'] = cross_df.apply(lambda row: row['cluster'] if (row['event.interval'] >= row['Minimum'] and row['event.interval'] <= row['Maximum']) else np.nan, axis=1)
+        cross_df['Final_cluster'] = cross_df.apply(lambda row: row['cluster'] 
+                                                    if (row['event.interval'] >= row['Minimum'] and row['event.interval'] <= row['Maximum'])
+                                                    else np.nan, axis=1)
         results = cross_df.dropna(subset=['Final_cluster']).copy()[['pnr','Median','Final_cluster']]
         most_common_cluster = results['Final_cluster'].value_counts().idxmax()
         default_median = cluster_stats.loc[cluster_stats['cluster'] == most_common_cluster, 'Median'].values[0]
@@ -253,29 +255,29 @@ def SEE_dbscan(arg1):
 # Perform SEE on a chosen medication (e.g., "medA") using both methods
 # -------------------------
 final_km, details_km = SEE_kmeans("medA")
-final_db, details_db = SEE_dbscan("medA")
+final_optics, details_optics = SEE_optics("medA")
 
 # Extract the 'test' differences from each clustering method
 test_km = details_km['test'].dropna()
-test_db = details_db['test'].dropna()
+test_optics = details_optics['test'].dropna()
 
 # Perform Mann–Whitney U test on the two distributions
-u_stat, p_val = mannwhitneyu(test_km, test_db, alternative='two-sided')
-print("Mann–Whitney U Test comparing KMeans vs DBSCAN (using shannon's entropy):")
+u_stat, p_val = mannwhitneyu(test_km, test_optics, alternative='two-sided')
+print("Mann–Whitney U Test comparing KMeans vs OPTICS (using Shannon’s Entropy):")
 print(f"U statistic: {u_stat:.3f}")
 print(f"p-value: {p_val:.3f}")
 
 # Optional: visualize the two distributions side by side
 plt.figure(figsize=(8,6))
-plt.boxplot([test_km, test_db], labels=['KMeans', 'DBSCAN'])
+plt.boxplot([test_km, test_optics], labels=['KMeans', 'OPTICS'])
 plt.title("Comparison of 'test' differences between clustering methods")
 plt.ylabel("Difference (event.interval - Median)")
 plt.show()
 
 plt.figure(figsize=(8,6))
 combined = pd.DataFrame({
-    'Difference': np.concatenate([test_km.values, test_db.values]),
-    'Method': ['KMeans'] * len(test_km) + ['DBSCAN'] * len(test_db)
+    'Difference': np.concatenate([test_km.values, test_optics.values]),
+    'Method': ['KMeans'] * len(test_km) + ['OPTICS'] * len(test_optics)
 })
 sns.violinplot(x='Method', y='Difference', data=combined, inner="quartile")
 plt.title("Violin Plot of 'test' Differences")

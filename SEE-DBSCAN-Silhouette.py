@@ -167,10 +167,10 @@ def SEE_dbscan(arg1):
     X_scaled = scaler.fit_transform(X)
     
     # --- Silhouette Analysis using DBSCAN ---
-    eps_candidates = np.linspace(0.01, 10.0, 100)
+    eps_candidates = np.linspace(0.01, 10.0, 1000)
     sil_scores = {}
     for eps in eps_candidates:
-        db_candidate = DBSCAN(eps=eps, min_samples=3)  # default min_samples
+        db_candidate = DBSCAN(eps=eps, min_samples=4)  # default min_samples
         candidate_labels = db_candidate.fit_predict(X_scaled)
         # Only compute silhouette score if more than one cluster exists (ignoring noise)
         unique_labels = set(candidate_labels)
@@ -189,7 +189,7 @@ def SEE_dbscan(arg1):
     plt.ylabel("Silhouette Score")
     plt.show()
     
-    dbscan_final = DBSCAN(eps=optimal_eps)
+    dbscan_final = DBSCAN(eps=optimal_eps, min_samples=4)
     labels_final = dbscan_final.fit_predict(X_scaled)
     df_ecdf['cluster'] = labels_final
     
