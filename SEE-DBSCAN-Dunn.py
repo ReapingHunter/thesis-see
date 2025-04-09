@@ -212,10 +212,10 @@ def SEE_dbscan(arg1):
     X_scaled = scaler.fit_transform(X)
     
     # Explore candidate eps values for DBSCAN
-    eps_candidates = np.linspace(0.1, 10.0, 100)
+    eps_candidates = np.linspace(0.1, 20.0, 300)
     dunn_scores = {}
     for eps in eps_candidates:
-        dbscan_candidate = DBSCAN(eps=eps)
+        dbscan_candidate = DBSCAN(eps=eps, min_samples=3)
         candidate_labels = dbscan_candidate.fit_predict(X_scaled)
         # Consider only if there are at least 2 clusters (ignoring noise)
         valid_clusters = set(candidate_labels) - {-1}

@@ -180,10 +180,10 @@ def SEE_dbscan(arg1):
     X_scaled = scaler.fit_transform(X)
     
     # Explore candidate eps values for DBSCAN
-    eps_candidates = np.linspace(0.1, 10.0, 100)
+    eps_candidates = np.linspace(0.01, 10.0, 100)
     entropy_scores = {}
     for eps in eps_candidates:
-        dbscan_candidate = DBSCAN(eps=eps)  # Using default min_samples (typically 5)
+        dbscan_candidate = DBSCAN(eps=eps, min_samples=1)  # Using default min_samples (typically 5)
         candidate_labels = dbscan_candidate.fit_predict(X)
         # Only compute entropy if more than one valid cluster (ignoring noise) is found
         if len(set(candidate_labels) - {-1}) > 1:

@@ -169,10 +169,10 @@ def SEE_dbscan(arg1):
     X_scaled = scaler.fit_transform(X)
     
     # Explore candidate eps values for DBSCAN
-    eps_candidates = np.linspace(0.1, 10.0, 100)
+    eps_candidates = np.linspace(0.01, 10.0, 100)
     db_scores = {}
     for eps in eps_candidates:
-        dbscan_candidate = DBSCAN(eps=eps)  # Using default min_samples (typically 5)
+        dbscan_candidate = DBSCAN(eps=eps, min_samples=1)  # Using default min_samples (typically 5)
         candidate_labels = dbscan_candidate.fit_predict(X)
         unique_labels = set(candidate_labels)
         if len(unique_labels - {-1}) > 1:  # More than one valid cluster
