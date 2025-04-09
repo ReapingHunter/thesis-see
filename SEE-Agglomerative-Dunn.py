@@ -6,25 +6,13 @@ import seaborn as sns
 from statsmodels.distributions.empirical_distribution import ECDF
 from scipy.stats import gaussian_kde, mannwhitneyu
 from sklearn.preprocessing import StandardScaler
-from sklearn.cluster import DBSCAN
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, AgglomerativeClustering
 from sklearn.metrics import silhouette_score
+from scipy.spatial.distance import cdist
 
 # rpy2 (for AdhereR)
 import rpy2.robjects as robjects
 from rpy2.robjects import pandas2ri
-
-# Function to compute Shannon entropy of clustering (ignoring noise, i.e. label -1)
-def clustering_entropy(labels):
-    # Filter out noise points
-    valid = labels[labels != -1]
-    if len(valid) == 0:
-        return None
-    unique, counts = np.unique(valid, return_counts=True)
-    p = counts / counts.sum()
-    # Compute entropy: higher means a more balanced cluster distribution.
-    entropy = -np.sum(p * np.log(p))
-    return entropy
 
 # -------------------------
 # Load dataset – uses AdhereR's med.events
@@ -77,7 +65,6 @@ def SEE_kmeans(arg1):
     # We won’t use KDE for clustering in this version; we cluster on ECDF x-values.
     
     # --- KMeans Clustering with Silhouette Analysis on ECDF x-values ---
-    # We'll cluster the original sorted x-values
     X = df_ecdf[['x']].values
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
@@ -138,20 +125,72 @@ def SEE_kmeans(arg1):
     return final_df, data  # return the clustering details with the 'test' differences
 
 # -------------------------
-# SEE using DBSCAN with Shannon
+# SEE using Agglomerative Clustering with Silhouette Analysis
 # -------------------------
-def SEE_dbscan(arg1):
+
+
+def compute_dunn_index(X, labels):
+    """
+    Compute the Dunn index for clustering assignment.
+    
+    Parameters:
+        X : ndarray of shape (n_samples, n_features)
+            The feature matrix.
+        labels : array-like of shape (n_samples,)
+            Cluster labels for each sample.
+            
+    Returns:
+        dunn_index: float
+            The Dunn index (higher values indicate better clustering).
+    """
+    unique_labels = np.unique(labels)
+    if len(unique_labels) < 2:
+        return 0
+
+    # Compute intra-cluster distances (cluster diameters)
+    intra_dists = []
+    for label in unique_labels:
+        cluster_points = X[labels == label]
+        if len(cluster_points) > 1:
+            distances = cdist(cluster_points, cluster_points)
+            intra_dists.append(np.max(distances))
+        else:
+            intra_dists.append(0)
+    max_intra = max(intra_dists)
+    
+    # Compute inter-cluster distances: minimum distance between points in different clusters
+    inter_dists = []
+    unique_labels = list(unique_labels)
+    for i in range(len(unique_labels)):
+        for j in range(i + 1, len(unique_labels)):
+            points_i = X[labels == unique_labels[i]]
+            points_j = X[labels == unique_labels[j]]
+            distances = cdist(points_i, points_j)
+            inter_dists.append(np.min(distances))
+    if len(inter_dists) == 0:
+        return 0
+    min_inter = min(inter_dists)
+    
+    # Avoid division by zero
+    if max_intra == 0:
+        return np.inf
+    
+    return min_inter / max_intra
+
+def SEE_agglomerative(arg1):
     # Filter rows where ATC equals arg1
     subset = tidy[tidy['ATC'] == arg1].copy()
     base_data = subset.copy()
     
-    # Sort by patient and date, compute previous prescription date
+    # Sort by patient and date; compute previous prescription date
     data = subset.sort_values(['pnr', 'eksd']).copy()
     data['prev_eksd'] = data.groupby('pnr')['eksd'].shift(1)
     data = data.dropna(subset=['prev_eksd']).copy()
     
     # For each patient, randomly sample one row
-    data = data.groupby('pnr', group_keys=False).apply(lambda x: x.sample(1, random_state=1234)).reset_index(drop=True)
+    data = data.groupby('pnr', group_keys=False)\
+               .apply(lambda x: x.sample(1, random_state=1234))\
+               .reset_index(drop=True)
     data = data[['pnr', 'eksd', 'prev_eksd']]
     
     # Compute event interval
@@ -174,64 +213,60 @@ def SEE_dbscan(arg1):
     x_grid = np.linspace(log_intervals.min(), log_intervals.max(), 100)
     y_kde = kde(x_grid)
     
-    # (We again work with the ECDF x-values for clustering)
+    # Use the ECDF x-values for clustering
     X = df_ecdf[['x']].values
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
     
-    # Explore candidate eps values for DBSCAN
-    eps_candidates = np.linspace(0.01, 10.0, 100)
-    entropy_scores = {}
-    for eps in eps_candidates:
-        dbscan_candidate = DBSCAN(eps=eps, min_samples=4)  # Using default min_samples (typically 5)
-        candidate_labels = dbscan_candidate.fit_predict(X)
-        # Only compute entropy if more than one valid cluster (ignoring noise) is found
-        if len(set(candidate_labels) - {-1}) > 1:
-            score = clustering_entropy(candidate_labels)
-            if score is not None:
-                entropy_scores[eps] = score
-
-    if entropy_scores:
-        # We choose the candidate with the minimum entropy (i.e. most balanced cluster distribution)
-        optimal_eps = min(entropy_scores, key=entropy_scores.get)
+    # --- Dunn Index Analysis using Agglomerative Clustering ---
+    n_candidates = range(2, min(11, len(X_scaled)))
+    dunn_scores = {}
+    for n in n_candidates:
+        agg_candidate = AgglomerativeClustering(n_clusters=n, linkage='ward')
+        candidate_labels = agg_candidate.fit_predict(X_scaled)
+        # Only compute Dunn index if more than one cluster exists
+        if len(set(candidate_labels)) > 1:
+            score = compute_dunn_index(X_scaled, candidate_labels)
+            dunn_scores[n] = score
+    if dunn_scores:
+        optimal_n = max(dunn_scores, key=dunn_scores.get)
     else:
-        optimal_eps = 0.5  # fallback if entropy could not be computed
-
-    # Plot entropy scores as a function of eps
-    plt.figure(figsize=(8, 5))
-    plt.plot(list(entropy_scores.keys()), list(entropy_scores.values()), marker='o')
-    plt.title("Entropy Analysis (DBSCAN)")
-    plt.xlabel("eps")
-    plt.ylabel("Entropy")
+        optimal_n = 2
+    
+    plt.figure(figsize=(8,5))
+    plt.plot(list(dunn_scores.keys()), list(dunn_scores.values()), marker='o')
+    plt.title("Agglomerative Clustering Dunn Index Analysis")
+    plt.xlabel("Number of clusters")
+    plt.ylabel("Dunn Index")
     plt.show()
     
-    print(optimal_eps)
-    dbscan_final = DBSCAN(eps=optimal_eps, min_samples=4)
-    labels_final = dbscan_final.fit_predict(X_scaled)
+    # Final clustering using Agglomerative Clustering
+    agg_final = AgglomerativeClustering(n_clusters=optimal_n, linkage='ward')
+    labels_final = agg_final.fit_predict(X_scaled)
     df_ecdf['cluster'] = labels_final
     
-    # Compute cluster statistics (ignoring noise - label -1)
-    valid_clusters = df_ecdf[df_ecdf['cluster'] != -1]
-    if not valid_clusters.empty:
-        cluster_stats = (valid_clusters.groupby('cluster')['x']
-                         .agg(min_log=lambda x: np.log(x).min(),
-                              max_log=lambda x: np.log(x).max(),
-                              median_log=lambda x: np.log(x).median())
-                         .reset_index())
-        cluster_stats['Minimum'] = np.exp(cluster_stats['min_log'])
-        cluster_stats['Maximum'] = np.exp(cluster_stats['max_log'])
-        cluster_stats['Median'] = np.exp(cluster_stats['median_log'])
-        cluster_stats = cluster_stats[cluster_stats['Median'] > 0]
-    else:
-        cluster_stats = pd.DataFrame()
+    # Compute cluster statistics (all points are now assigned to clusters)
+    valid_clusters = df_ecdf.copy()
+    cluster_stats = (valid_clusters.groupby('cluster')['x']
+                     .agg(min_log=lambda x: np.log(x).min(),
+                          max_log=lambda x: np.log(x).max(),
+                          median_log=lambda x: np.log(x).median())
+                     .reset_index())
+    cluster_stats['Minimum'] = np.exp(cluster_stats['min_log'])
+    cluster_stats['Maximum'] = np.exp(cluster_stats['max_log'])
+    cluster_stats['Median'] = np.exp(cluster_stats['median_log'])
+    cluster_stats = cluster_stats[cluster_stats['Median'] > 0]
     
-    # Cross join to assign clusters based on event interval falling within [Minimum, Maximum]
+    # Cross join to assign clusters based on whether event.interval falls in [Minimum, Maximum]
     data['_key'] = 1
-    if not cluster_stats.empty:
-        cluster_stats['_key'] = 1
-        cross_df = pd.merge(data, cluster_stats, on='_key').drop('_key', axis=1)
-        cross_df['Final_cluster'] = cross_df.apply(lambda row: row['cluster'] if (row['event.interval'] >= row['Minimum'] and row['event.interval'] <= row['Maximum']) else np.nan, axis=1)
-        results = cross_df.dropna(subset=['Final_cluster']).copy()[['pnr','Median','Final_cluster']]
+    cluster_stats['_key'] = 1
+    cross_df = pd.merge(data, cluster_stats, on='_key').drop('_key', axis=1)
+    cross_df['Final_cluster'] = cross_df.apply(
+        lambda row: row['cluster'] if (row['event.interval'] >= row['Minimum'] and row['event.interval'] <= row['Maximum'])
+        else np.nan, axis=1)
+    results = cross_df.dropna(subset=['Final_cluster']).copy()[['pnr','Median','Final_cluster']]
+    
+    if not results.empty:
         most_common_cluster = results['Final_cluster'].value_counts().idxmax()
         default_median = cluster_stats.loc[cluster_stats['cluster'] == most_common_cluster, 'Median'].values[0]
     else:
@@ -249,33 +284,34 @@ def SEE_dbscan(arg1):
     
     return final_df, data
 
+
 # -------------------------
 # Perform SEE on a chosen medication (e.g., "medA") using both methods
 # -------------------------
 final_km, details_km = SEE_kmeans("medA")
-final_db, details_db = SEE_dbscan("medA")
+final_ag, details_ag = SEE_agglomerative("medA")  # Now using Agglomerative Clustering instead of DBSCAN
 
 # Extract the 'test' differences from each clustering method
 test_km = details_km['test'].dropna()
-test_db = details_db['test'].dropna()
+test_ag = details_ag['test'].dropna()
 
 # Perform Mann–Whitney U test on the two distributions
-u_stat, p_val = mannwhitneyu(test_km, test_db, alternative='two-sided')
-print("Mann–Whitney U Test comparing KMeans vs DBSCAN (using shannon's entropy):")
+u_stat, p_val = mannwhitneyu(test_km, test_ag, alternative='two-sided')
+print("Mann–Whitney U Test comparing KMeans vs Agglomerative Clustering (using calinski score):")
 print(f"U statistic: {u_stat:.3f}")
 print(f"p-value: {p_val:.3f}")
 
 # Optional: visualize the two distributions side by side
 plt.figure(figsize=(8,6))
-plt.boxplot([test_km, test_db], labels=['KMeans', 'DBSCAN'])
+plt.boxplot([test_km, test_ag], labels=['KMeans', 'Agglomerative'])
 plt.title("Comparison of 'test' differences between clustering methods")
 plt.ylabel("Difference (event.interval - Median)")
 plt.show()
 
 plt.figure(figsize=(8,6))
 combined = pd.DataFrame({
-    'Difference': np.concatenate([test_km.values, test_db.values]),
-    'Method': ['KMeans'] * len(test_km) + ['DBSCAN'] * len(test_db)
+    'Difference': np.concatenate([test_km.values, test_ag.values]),
+    'Method': ['KMeans'] * len(test_km) + ['Agglomerative'] * len(test_ag)
 })
 sns.violinplot(x='Method', y='Difference', data=combined, inner="quartile")
 plt.title("Violin Plot of 'test' Differences")
