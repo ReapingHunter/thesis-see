@@ -260,7 +260,7 @@ test_db = details_db['test'].dropna()
 
 # Perform Mann–Whitney U test on the two distributions
 u_stat, p_val = mannwhitneyu(test_km, test_db, alternative='two-sided')
-print("Mann–Whitney U Test comparing KMeans vs DBSCAN (using silhouette score):")
+print("Mann–Whitney U Test comparing KMeans vs DBSCAN (using shannon's entropy):")
 print(f"U statistic: {u_stat:.3f}")
 print(f"p-value: {p_val:.3f}")
 
