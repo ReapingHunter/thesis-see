@@ -26,7 +26,7 @@ tidy = ExamplePats.copy()
 tidy.columns = ["pnr", "eksd", "perday", "ATC", "dur_original"]
 tidy['eksd'] = pd.to_datetime(tidy['eksd'], format='%m/%d/%Y')
 
-def See(arg1):
+def See_kmeans(arg1):
     # Filter rows where ATC equals arg1
     C09CA01 = tidy[tidy['ATC'] == arg1].copy()
 
@@ -162,40 +162,12 @@ def see_assumption(df):
     plt.ylabel("Duration (days)")
     plt.show()
 
-def validate_clustering(clust_df):
-    """
-    Validate the clustering results by summarizing the difference between
-    each event interval and its cluster's median (stored in the 'test' column)
-    and plotting these differences.
-    """
-    # Summary statistics per cluster
-    summary = clust_df.groupby('Cluster')['test'].agg(['mean', 'median', 'std', 'count']).reset_index()
-    print("Clustering differences summary (difference = event.interval - Median):")
-    print(summary)
-    
-    # Plot the distribution of differences for each cluster.
-    plt.figure(figsize=(10, 6))
-    sns.boxplot(x='Cluster', y='test', data=clust_df)
-    sns.stripplot(x='Cluster', y='test', data=clust_df, color='orange', jitter=True, alpha=0.6)
-    plt.axhline(0, color='red', linestyle='--')
-    plt.title("Deviation of Event Interval from Cluster Median")
-    plt.xlabel("Cluster")
-    plt.ylabel("Difference (event.interval - Median)")
-    plt.show()
-
 # -------------------------------------------------------------------------
 # Generate medA and medB using the See() function and capture clustering details
 # -------------------------------------------------------------------------
-medA_final, medA_clust = See("medA")
-medB_final, medB_clust = See("medB")
+medA_final, medA_clust = See_kmeans("medA")
+medB_final, medB_clust = See_kmeans("medB")
 
 # Plot the assumption for medA and medB
 see_assumption(medA_final)
 see_assumption(medB_final)
-
-# Validate the clustering results for medA and medB
-print("\nValidation for medA clustering:")
-validate_clustering(medA_clust)
-
-print("\nValidation for medB clustering:")
-validate_clustering(medB_clust)
