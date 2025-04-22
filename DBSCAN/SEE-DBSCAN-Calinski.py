@@ -343,6 +343,7 @@ def see_assumption(df):
     df2 = df_sorted[df_sorted['p_number'] >= 2].copy()
     df2 = df2[['pnr', 'eksd', 'prev_eksd', 'p_number']]
     df2['Duration'] = (df2['eksd'] - df2['prev_eksd']).dt.days
+    df2['p_number'] = df2['p_number'].astype(str)
     
     plt.figure(figsize=(8, 6))
     sns.boxplot(x='p_number', y='Duration', data=df2)
@@ -352,3 +353,21 @@ def see_assumption(df):
     plt.xlabel("Prescription Number")
     plt.ylabel("Duration (days)")
     plt.show()
+
+def plot_medication_duration(df, med_name, color='lightblue'):
+    df = df.sort_values(['pnr', 'eksd']).copy()
+    df['prev_eksd'] = df.groupby('pnr')['eksd'].shift(1)
+    df['Duration'] = (df['eksd'] - df['prev_eksd']).dt.days
+    df = df.dropna(subset=['Duration'])
+
+    plt.figure(figsize=(6, 6))
+    sns.boxplot(y=df['Duration'], color=color)
+    plt.axhline(y=df['Duration'].median(), color='red', linestyle='--', label='Median')
+    plt.title(f"Prescription Durations for {med_name}")
+    plt.ylabel("Duration (days)")
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+see_assumption(medA_final_km)
+plot_medication_duration(medA_final_km, "medA");
