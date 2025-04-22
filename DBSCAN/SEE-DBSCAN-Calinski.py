@@ -1,3 +1,4 @@
+import optuna
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -282,44 +283,53 @@ def See_dbscan(arg1, eps_range=(0.01, 10.0), num_eps=100, min_samples=4):
     return final_df, drug_see_p1
 
 
-
-def plot_cluster_comparison(cluster_details_km, cluster_details_dbscan):
+def plot_cluster_comparison(cluster_details_km, cluster_details_dbscan, med_name="Medication"):
     """
-    Compare the clustering outputs of KMeans and DBSCAN by plotting their 'test' values
-    (the difference between event interval and assigned median) in a side-by-side boxplot.
-    A Mann–Whitney U test is performed to assess whether the distributions differ significantly.
+    Compare KMeans raw durations (between eksd dates) with DBSCAN test values (distance from cluster median).
+    
+    KMeans: Shows how consistent the time between prescriptions is (Duration).
+    DBSCAN: Shows how tight the clustering is (test value = deviation from cluster median).
     
     Parameters:
-      cluster_details_km (DataFrame): DataFrame from the KMeans clustering method with at least 'pnr' and 'test' columns.
-      cluster_details_dbscan (DataFrame): DataFrame from the DBSCAN clustering method with at least 'pnr' and 'test' columns.
+        cluster_details_km (DataFrame): Must contain 'pnr' and 'eksd' (datetime).
+        cluster_details_dbscan (DataFrame): Must contain 'pnr' and 'test' (numeric).
+        med_name (str): Name of the medication (used in plot title).
     """
-    # Extract and label the relevant data from each clustering method.
-    df_km = cluster_details_km[['pnr', 'test']].copy()
+    # --- KMEANS: compute raw durations ---
+    df_km = cluster_details_km.sort_values(['pnr', 'eksd']).copy()
+    df_km['prev_eksd'] = df_km.groupby('pnr')['eksd'].shift(1)
+    df_km['Duration'] = (df_km['eksd'] - df_km['prev_eksd']).dt.days
+    df_km = df_km.dropna(subset=['Duration'])
+    df_km['value'] = df_km['Duration']
     df_km['method'] = 'KMeans'
-    
+
+    # --- DBSCAN: use test values (deviation from cluster median) ---
     df_db = cluster_details_dbscan[['pnr', 'test']].copy()
+    df_db = df_db.dropna(subset=['test'])
+    df_db['value'] = df_db['test']
     df_db['method'] = 'DBSCAN'
-    
-    # Combine the data into a single DataFrame.
+
+    # Combine for comparison
     combined_df = pd.concat([df_km, df_db], ignore_index=True)
-    
-    # Calculate the Mann–Whitney U test comparing the test values for KMeans and DBSCAN.
-    km_values = combined_df[combined_df['method'] == 'KMeans']['test']
-    db_values = combined_df[combined_df['method'] == 'DBSCAN']['test']
-    
+
+    # Mann–Whitney U test between KMeans durations and DBSCAN test values
+    km_values = combined_df[combined_df['method'] == 'KMeans']['value']
+    db_values = combined_df[combined_df['method'] == 'DBSCAN']['value']
     if len(km_values) > 0 and len(db_values) > 0:
         stat, pvalue = mannwhitneyu(km_values, db_values, alternative='two-sided')
         annotation = f"U = {stat:.2f}, p = {pvalue:.3g}"
     else:
         annotation = "Not enough data for Mann–Whitney U test"
-    
-    # Create a side-by-side boxplot using seaborn.
+
+    # --- PLOT ---
     plt.figure(figsize=(8, 6))
-    sns.boxplot(x='method', y='test', data=combined_df, 
+    sns.boxplot(x='method', y='value', data=combined_df,
                 palette={"KMeans": "lightblue", "DBSCAN": "lightgreen"})
-    plt.title(f"Comparison of Clustering Methods\n{annotation}")
+    plt.title(f"Raw Duration (KMeans) vs Clustering Deviation (DBSCAN)\n{annotation}\n{med_name}")
     plt.xlabel("Clustering Method")
-    plt.ylabel("Difference (event interval - assigned median)")
+    plt.ylabel("KMeans: Duration  |  DBSCAN: Test Value")
+    plt.legend()
+    plt.tight_layout()
     plt.show()
 
 # -------------------------------------------------------------------------
@@ -332,8 +342,8 @@ medB_final_km, medB_clust_km = See_kmeans("medB")
 medA_final_db, medA_clust_db = See_dbscan("medA")
 medB_final_db, medB_clust_db = See_dbscan("medB")
 
-plot_cluster_comparison(medA_clust_km, medA_clust_db)
-plot_cluster_comparison(medB_clust_km, medB_clust_db)
+plot_cluster_comparison(medA_final_km, medA_clust_db)
+plot_cluster_comparison(medB_final_km, medB_clust_db)
 
 # Plot the assumption for medA and medB (using your original function)
 def see_assumption(df):
@@ -354,20 +364,8 @@ def see_assumption(df):
     plt.ylabel("Duration (days)")
     plt.show()
 
-def plot_medication_duration(df, med_name, color='lightblue'):
-    df = df.sort_values(['pnr', 'eksd']).copy()
-    df['prev_eksd'] = df.groupby('pnr')['eksd'].shift(1)
-    df['Duration'] = (df['eksd'] - df['prev_eksd']).dt.days
-    df = df.dropna(subset=['Duration'])
-
-    plt.figure(figsize=(6, 6))
-    sns.boxplot(y=df['Duration'], color=color)
-    plt.axhline(y=df['Duration'].median(), color='red', linestyle='--', label='Median')
-    plt.title(f"Prescription Durations for {med_name}")
-    plt.ylabel("Duration (days)")
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
-
 see_assumption(medA_final_km)
-plot_medication_duration(medA_final_km, "medA");
+see_assumption(medA_final_db)
+
+see_assumption(medB_final_km)
+see_assumption(medB_final_db)
